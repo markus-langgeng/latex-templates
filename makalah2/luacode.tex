@@ -1,0 +1,281 @@
+\begin{luacode*}
+require"chn-to-pinyin"
+
+pinyin_vowel_v_mapping = {
+    "ü", "Ü"
+}
+
+pinyin_vowel_tone_mapping = {
+    ["a"] = {
+        "ā", "á", "ǎ", "à"
+    },
+    ["e"] = {
+        "ē", "é", "ě", "è"
+    },
+    ["i"] = {
+        "ī", "í", "ǐ", "ì"
+    },
+    ["o"] = {
+        "ō", "ó", "ǒ", "ò"
+    },
+    ["u"] = {
+        "ū", "ú", "ǔ", "ù"
+    },
+    ["v"] = {
+        "ǖ", "ǘ", "ǚ", "ǜ"
+    },
+    ["A"] = {
+        "Ā", "Á", "Ǎ", "À"
+    },
+    ["E"] = {
+        "Ē", "É", "Ě", "È"
+    },
+    ["I"] = {
+        "Ī", "Í", "Ǐ", "Ì"
+    },
+    ["O"] = {
+        "Ō", "Ó", "Ǒ", "Ò"
+    },
+    ["U"] = {
+        "Ū", "Ú", "Ǔ", "Ù"
+    },
+    ["V"] = {
+        "Ǖ", "Ǘ", "Ǚ", "Ǜ"
+    }
+}
+
+pinyin_vowel_letters_lower = {"a", "e", "i", "o", "u", "v"}
+
+pinyin_vowel_to_lower = {}
+pinyin_vowel_to_upper = {}
+
+for ind, lower in ipairs(pinyin_vowel_letters_lower) do
+    local upper = lower:upper()
+    local tbl1 = pinyin_vowel_tone_mapping[lower]
+    local tbl2 = pinyin_vowel_tone_mapping[upper]
+    assert(#tbl1 == #tbl2, "inconsistent pinyin configuration")
+    for i=1,#tbl1 do
+        pinyin_vowel_to_lower[tbl2[i]] = tbl1[i]
+        pinyin_vowel_to_upper[tbl1[i]] = tbl2[i]
+    end
+end
+pinyin_vowel_to_upper[pinyin_vowel_v_mapping[1]] = pinyin_vowel_v_mapping[2]
+pinyin_vowel_to_lower[pinyin_vowel_v_mapping[2]] = pinyin_vowel_v_mapping[1]
+
+pinyin_consonants = {
+    "zh", "ch", "sh", "b", "p", "m", "f", "d",
+    "t", "n", "l", "g", "k", "h", "j", "q", "x",
+    "r", "z", "c", "s", "w", "y"
+}
+
+pinyin_vowels = {
+    "iang", "uang", "ueng", "iong", "uai", "uei", "iao", "ian",
+    "uan", "van", "ang", "eng", "ing", "ong", "ia", "ua", "uo",
+    "ie", "ve", "ai", "ei", "ao", "ou", "iu", "an", "en", "in",
+    "un", "vn", "ue", "er", "i", "u", "v", "a", "o", "e"
+}
+
+pinyin_vowel_tone_locs = {
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 2, 2,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1
+}
+
+assert(#pinyin_vowels == #pinyin_vowel_tone_locs, "inconsistent pinyin configuration")
+
+function find_next_consonant(s, s_lower, loc)
+    local b
+    for _, consonant in ipairs(pinyin_consonants) do
+        b, _ = s_lower:find(consonant, loc)
+        if b == loc then
+            return s:sub(loc, loc + #consonant - 1)
+        end
+    end
+    return nil
+end
+
+function find_next_vowel(s, s_lower, loc)
+    local b
+    for vowel_ind, vowel in ipairs(pinyin_vowels) do
+        b, _ = s_lower:find(vowel, loc)
+        if b == loc then
+            return s:sub(loc, loc + #vowel - 1), vowel_ind
+        end
+    end
+    return nil
+end
+
+function find_next_tone(s, s_lower, loc)
+    local char = s_lower:sub(loc, loc)
+    if char ~= nil and char:len() > 0 then
+        local byte = char:byte()
+        if byte >= 48 and byte <= 57 then
+            return char
+        end
+    end
+    return nil
+end
+
+function render_pinyin(consonant, vowel, vowel_ind, tone)
+    local res = ""
+    if consonant ~= nil then
+        res = res .. consonant
+    end
+    local tone_loc = -1
+    if tone ~= nil then
+         tone_loc = pinyin_vowel_tone_locs[vowel_ind]
+    end
+    local char, tone_char
+    for i=1,vowel:len() do
+        char = vowel:sub(i, i)
+        if i == tone_loc then
+            tone_char = pinyin_vowel_tone_mapping[char][tonumber(tone)]
+            assert(tone_char ~= nil, string.format("invalid tone combination: '%s', %s", vowel, tone))
+            res = res .. tone_char
+        else
+            -- deal with "v"
+            if char == "v" then
+                res = res .. pinyin_vowel_v_mapping[1]
+            elseif char == "V" then
+                res = res .. pinyin_vowel_v_mapping[2]
+            else
+                res = res .. char
+            end
+        end
+    end
+    return res
+end
+
+function latin_to_pinyin(s)
+    -- discard spaces
+    s = s:gsub("%s", "")
+    local s_lower = s:lower()
+    local loc = 1
+    local old_loc = loc
+    local consonant, vowel, tone, vowel_ind, render
+    local result = {}
+    while loc <= s:len() do
+        -- start by finding consonant
+        consonant = find_next_consonant(s, s_lower, loc)
+        if consonant ~= nil then
+            loc = loc + consonant:len()
+        end
+        -- proceed to find vowel
+        vowel, vowel_ind = find_next_vowel(s, s_lower, loc)
+        assert(vowel ~= nil, string.format("cannot find vowel for '%s...'", s:sub(loc, loc + 10)))
+        loc = loc + vowel:len()
+        -- peek next char to see if we can find a tone
+        tone = find_next_tone(s, s_lower, loc)
+        if tone ~= nil then
+            loc = loc + tone:len()
+        end
+        if loc == old_loc then
+            error("latin to pinyin algorithm is stuck, please check the integrity of latin input")
+        end
+        texio.write_nl(string.format("pinyin-debug: %s, %s, %s", consonant, vowel, tone))
+        render = render_pinyin(consonant, vowel, vowel_ind, tone)
+        table.insert(result, render)
+        old_loc = loc
+    end
+    return result
+end
+
+function chinese_to_pinyin(s)
+    local code = utf8.codepoint(s)
+    local char = utf8.char(code)
+    local pinyin = chn_to_pinyin[char]
+    return char, pinyin
+end
+
+
+function pinyin_upper(s)
+    cap_first = cap_first or false
+    local res = ""
+    local query, char
+    for p, code in utf8.codes(s) do
+        char = utf8.char(code)
+        query = pinyin_vowel_to_upper[char]
+        if query ~= nil then
+            res = res .. query
+        else
+            res = res .. char:upper()
+        end
+    end
+    return res
+end
+
+function chinese_to_pinyin_latex(s, cap_first)
+    cap_first = cap_first or false
+    local char, pinyin = chinese_to_pinyin(s)
+    local out_val  = ""
+    if pinyin==nil then
+        -- special treatment for "*"
+        if char == "*" then
+            out_val = char
+        else
+            out_val = [[\textcolor{red}{]] .. char .. "}"
+        end
+    else
+        if cap_first then
+            local first_code = utf8.codepoint(pinyin)
+            local first_code_offset = utf8.offset(pinyin, 2)
+            pinyin = pinyin_upper(utf8.char(first_code)) .. pinyin:sub(first_code_offset)
+        end
+        out_val = pinyin
+    end
+    token.set_macro("l_doc_tmpc_tl", out_val)
+end
+
+
+
+\end{luacode*}
+
+\newcommand{\latintopinyin}[1]{%
+    \directlua{
+        local pinyin_table = latin_to_pinyin("\luaescapestring{#1}")
+        tex.print(table.concat(pinyin_table, " "))
+    }%
+}
+
+\ExplSyntaxOn
+
+\tl_new:N \l_doc_tmpa_tl
+\tl_new:N \l_doc_tmpb_tl
+\tl_new:N \l_doc_tmpc_tl
+
+\NewDocumentCommand{\chntopinyin}{sm}{
+    \group_begin:
+    \tl_set:Nn \l_doc_tmpa_tl {#2}
+    \tl_clear:N \l_doc_tmpb_tl
+    \bool_do_until:nn {\tl_if_empty_p:N \l_doc_tmpa_tl} {
+        \exp_args:NV \tl_if_head_is_group:nTF \l_doc_tmpa_tl {
+            \tl_put_right:Nx \l_doc_tmpb_tl {{\tl_head:N \l_doc_tmpa_tl}}
+        } {
+            \exp_args:Nx \token_if_cs:NTF {\tl_head:N \l_doc_tmpa_tl} {
+                \tl_put_right:Nx \l_doc_tmpb_tl {\tl_head:N \l_doc_tmpa_tl}
+            } {
+                \IfBooleanTF{#1}{
+                    \directlua{
+                        chinese_to_pinyin_latex("\luaescapestring{\tl_head:N\l_doc_tmpa_tl}", true)
+                    }
+                    \tl_put_right:NV \l_doc_tmpb_tl \l_doc_tmpc_tl
+                }{
+                    \directlua{
+                        chinese_to_pinyin_latex("\luaescapestring{\tl_head:N\l_doc_tmpa_tl}")
+                    }
+                    \tl_put_right:NV \l_doc_tmpb_tl \l_doc_tmpc_tl
+                }
+                \tl_put_right:NV \l_doc_tmpb_tl \space
+            }
+        }
+        \tl_set:Nx \l_doc_tmpa_tl {\tl_tail:N \l_doc_tmpa_tl}
+    }
+    \tl_use:N \l_doc_tmpb_tl
+    \group_end:
+}
+
+
+\newcommand{\pinyin}[2]{
+    \latintopinyin{#2}\space
+}
+
+\ExplSyntaxOff
